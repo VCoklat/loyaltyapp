@@ -48,3 +48,32 @@ h2{font-size:20px;margin:0 0 8px}
 .seg{display:flex;background:#fff;border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:12px}
 .seg button{flex:1;background:none;color:var(--mute);padding:8px;border-radius:10px}
 .seg button.act{background:var(--green);color:#fff}
+
+/* ---- Mode toggle ---- */
+.mode{display:flex;background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px}
+.mode button{background:none;color:var(--mute);padding:5px 10px;font-size:12px;border-radius:999px}
+.mode button.act{background:var(--green);color:#fff}
+
+/* ---- Web (desktop) layout ---- */
+.shell.web{display:flex;min-height:100vh}
+.side{width:240px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);padding:20px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+.side img{height:44px}
+.side>button{background:none;color:var(--ink);text-align:left;display:flex;gap:10px;align-items:center;padding:11px 12px;border-radius:12px}
+.side>button b{font-size:18px}
+.side>button:hover{background:#f3fbf6}
+.side>button.act{background:var(--green);color:#fff}
+.side-card{margin-top:auto;text-align:center;border:1px solid var(--line);border-radius:16px;padding:14px;background:var(--bg)}
+.shell.web .app{max-width:1180px;width:100%;padding:12px 32px 40px}
+.shell.web .top{padding:16px 0 20px}
+.content{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.content>*{margin:0!important}
+.content>.full,.content>.seg,.content>.grid2,.content>button.ghost{grid-column:1/-1}
+.content>button.ghost{justify-self:start}
+.content.c-home{grid-template-columns:repeat(3,minmax(0,1fr))}
+.content.c-home .hero{padding:28px}
+.content.c-home .hero .big{font-size:56px}
+.content.c-pay{grid-template-columns:minmax(0,620px)}
+.content.c-map{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+.content.c-rewards{grid-template-columns:repeat(3,minmax(0,1fr))}
+.content .seg{max-width:420px}
+@media (max-width:899px){.shell.web .side{width:76px}.shell.web .side>button{font-size:0;justify-content:center}.shell.web .side-card,.shell.web .side img{display:none}.content,.content.c-home,.content.c-rewards,.content.c-map{grid-template-columns:1fr}.shell.web .app{padding:12px 16px 40px}}

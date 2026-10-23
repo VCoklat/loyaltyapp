@@ -24,11 +24,15 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [toast, setToast] = useState("");
   const [modal, setModal] = useState(null);
+  const [mode, setMode] = useState("mobile");
 
   useEffect(() => {
     let d; try { d = JSON.parse(localStorage.getItem(KEY)); } catch {}
     setS(d || fresh());
+    let m; try { m = localStorage.getItem("hompim_mode"); } catch {}
+    setMode(m || (window.innerWidth >= 900 ? "web" : "mobile"));
   }, []);
+  const switchMode = (m) => { setMode(m); try { localStorage.setItem("hompim_mode", m); } catch {} };
   useEffect(() => { if (s) try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }, [s]);
   if (!s) return null;
 
@@ -81,30 +85,61 @@ export default function App() {
 
   const props = { s, tier, next, pct, unplayed, pay, playGame, redeem, useVoucher, createVoucher, setTab, setModal, flash };
 
-  return (
-    <main className="app">
-      {toast && <div className="toast">{toast}</div>}
-      <header className="top">
-        <Logo />
-        <span className="pill" style={{ color: tier.color }}>★ {s.points.toLocaleString("id-ID")} poin</span>
-      </header>
+  const NAV = [["home", "🏠", "Beranda"], ["pay", "💳", "Bayar"], ["qr", "🎟️", "Tiket QR"], ["rewards", "🎁", "Reward"], ["map", "🗺️", "Peta"], ["history", "📜", "Riwayat"]];
+  const TITLES = { home: "Beranda", pay: "Hompimplay Payments", qr: "Tiket QR", rewards: "Reward & Voucher", map: "Peta Hompimplay", history: "Riwayat Poin", admin: "Panel Admin" };
+  const web = mode === "web";
 
-      {tab === "home" && <Home {...props} />}
-      {tab === "pay" && <Pay {...props} />}
-      {tab === "qr" && <Tickets {...props} />}
-      {tab === "rewards" && <Rewards {...props} />}
-      {tab === "map" && <MapView {...props} />}
-      {tab === "history" && <History {...props} reset={() => setS(fresh())} />}
-      {tab === "admin" && <Admin {...props} />}
+  const toggle = (
+    <div className="mode">
+      <button className={!web ? "act" : ""} onClick={() => switchMode("mobile")}>📱 Mobile</button>
+      <button className={web ? "act" : ""} onClick={() => switchMode("web")}>🖥️ Web</button>
+    </div>
+  );
+
+  return (
+    <div className={web ? "shell web" : "shell"}>
+      {toast && <div className="toast">{toast}</div>}
+
+      {web && <aside className="side">
+        <div style={{ padding: "4px 8px 18px" }}><Logo /></div>
+        {[...NAV, ["admin", "⚙️", "Admin"]].map(([k, i, l]) => (
+          <button key={k} className={tab === k ? "act" : ""} onClick={() => setTab(k)}><b>{i}</b>{l}</button>
+        ))}
+        <div className="side-card">
+          <div className="mute">Level</div><b style={{ color: tier.color }}>{tier.name} · {tier.mult}×</b>
+          <div style={{ marginTop: 10 }}><QRCodeSVG value={s.member.id} size={96} /></div>
+          <div className="mute">{s.member.id}</div>
+        </div>
+      </aside>}
+
+      <main className="app">
+        <header className="top">
+          {web ? <h1 style={{ margin: 0, fontSize: 28 }}>{TITLES[tab]}</h1> : <Logo />}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {toggle}
+            <span className="pill" style={{ color: tier.color }}>★ {s.points.toLocaleString("id-ID")}{web ? " poin" : ""}</span>
+          </div>
+        </header>
+
+        <div className={web ? `content c-${tab}` : ""}>
+          {tab === "home" && <Home {...props} web={web} />}
+          {tab === "pay" && <Pay {...props} />}
+          {tab === "qr" && <Tickets {...props} />}
+          {tab === "rewards" && <Rewards {...props} />}
+          {tab === "map" && <MapView {...props} />}
+          {tab === "history" && <History {...props} reset={() => setS(fresh())} />}
+          {tab === "admin" && <Admin {...props} />}
+        </div>
+      </main>
 
       {modal && <Modal modal={modal} close={() => setModal(null)} s={s} />}
 
-      <nav className="tabs">
-        {[["home", "🏠", "Beranda"], ["pay", "💳", "Bayar"], ["qr", "🎟️", "Tiket QR"], ["rewards", "🎁", "Reward"], ["map", "🗺️", "Peta"], ["history", "📜", "Riwayat"]].map(([k, i, l]) => (
+      {!web && <nav className="tabs">
+        {NAV.map(([k, i, l]) => (
           <button key={k} className={tab === k ? "act" : ""} onClick={() => setTab(k)}><b>{i}</b>{l}</button>
         ))}
-      </nav>
-    </main>
+      </nav>}
+    </div>
   );
 }
 
@@ -114,9 +149,9 @@ function Logo() {
     : <img src={LOGO} alt="HomPim Play" onError={() => setErr(true)} />;
 }
 
-function Home({ s, tier, next, pct, unplayed, setTab, setModal }) {
+function Home({ s, tier, next, pct, unplayed, setTab, setModal, web }) {
   return <>
-    <div className="card hero">
+    <div className="card hero full">
       <div className="row"><b>Halo, {s.member.name} 👋</b><span className="tag" style={{ background: "#fff", color: tier.color }}>{tier.name} · {tier.mult}×</span></div>
       <div className="big">{s.points.toLocaleString("id-ID")}</div>
       <div>poin siap ditukar</div>
@@ -129,11 +164,11 @@ function Home({ s, tier, next, pct, unplayed, setTab, setModal }) {
       <QRCodeSVG value={s.member.id} size={56} />
     </div>
 
-    <div className="grid4" style={{ marginBottom: 12 }}>
+    {!web && <div className="grid4" style={{ marginBottom: 12 }}>
       {[["💳", "Bayar", "pay"], ["🎟️", "Tiket", "qr"], ["🎁", "Voucher", "rewards"], ["🗺️", "Peta", "map"]].map(([e, l, t]) => (
         <button key={t} className="quick" onClick={() => setTab(t)}><span>{e}</span>{l}</button>
       ))}
-    </div>
+    </div>}
 
     {unplayed.length > 0 && <div className="card" style={{ borderColor: "var(--orange)" }}>
       <div className="row"><h2>Belum dimainkan ⏳</h2><span className="tag o">{unplayed.length} wahana</span></div>
@@ -149,7 +184,7 @@ function Home({ s, tier, next, pct, unplayed, setTab, setModal }) {
         <div className="row"><span>⭐ Bonus level {tier.name}</span><b>{tier.mult}×</b></div>
       </div>
     </div>
-    <button className="ghost" style={{ width: "100%" }} onClick={() => setTab("admin")}>⚙️ Panel Admin (buat voucher)</button>
+    {!web && <button className="ghost" style={{ width: "100%" }} onClick={() => setTab("admin")}>⚙️ Panel Admin (buat voucher)</button>}
   </>;
 }
 
@@ -188,7 +223,7 @@ function Tickets({ s, playGame, setModal }) {
       <button className={f === "active" ? "act" : ""} onClick={() => setF("active")}>Masih aktif</button>
       <button className={f === "done" ? "act" : ""} onClick={() => setF("done")}>Selesai</button>
     </div>
-    {list.length === 0 && <div className="card mute" style={{ textAlign: "center" }}>Belum ada tiket. Beli di menu Bayar 🎟️</div>}
+    {list.length === 0 && <div className="card mute full" style={{ textAlign: "center" }}>Belum ada tiket. Beli di menu Bayar 🎟️</div>}
     {list.map((t) => {
       const left = t.games.filter((g) => !g.played).length;
       return <div key={t.id} className="card">
@@ -222,7 +257,7 @@ function Rewards({ s, redeem, useVoucher, setModal }) {
       <button className={f === "mine" ? "act" : ""} onClick={() => setF("mine")}>Voucher saya ({s.myVouchers.filter((v) => !v.used).length})</button>
     </div>
     {f === "catalog" ? <>
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12 }}>
+      <div className="full" style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12 }}>
         {cats.map((c) => <button key={c} className={c === cat ? "green" : "ghost"} style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setCat(c)}>{c}</button>)}
       </div>
       {s.vouchers.filter((v) => cat === "Semua" || v.cat === cat).map((v) => (
@@ -278,7 +313,7 @@ function MapView({ unplayed }) {
       </div>
       {pending(sel.id) > 0 && <p style={{ color: "var(--pink)", fontWeight: 700 }}>📍 {pending(sel.id)} wahana di zona ini belum kamu mainkan</p>}
     </div>
-    <a className="mute" target="_blank" rel="noreferrer" href="https://maps.google.com/?q=-6.8699251,107.6278598">Buka lokasi di Google Maps →</a>
+    <a className="mute full" target="_blank" rel="noreferrer" href="https://maps.google.com/?q=-6.8699251,107.6278598">Buka lokasi di Google Maps →</a>
   </>;
 }
 
@@ -297,7 +332,7 @@ function History({ s, reset }) {
         <button key={k} className={f === k ? "act" : ""} onClick={() => setF(k)}>{l}</button>
       ))}
     </div>
-    <div className="card list">
+    <div className="card list full">
       {list.map((h, i) => (
         <div key={i} className="row"><div>{h.d}<div className="mute">{fmt(h.t)}</div></div>
           <b style={{ color: h.p > 0 ? "var(--green)" : "var(--orange)" }}>{h.p > 0 ? "+" : ""}{h.p}</b></div>
