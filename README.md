@@ -1,26 +1,35 @@
-# Loyalty Club
+# Hompimplay Rewards (Mockup)
 
-Webapp loyalty (Next.js 14) untuk menaikkan retention customer.
+Mockup web app loyalty berbasis web (mobile-first) untuk HomPim Play, Next.js 14, siap deploy di Vercel.
 
-## Fitur retention
-- **Tier member** (Bronze → Platinum) dengan multiplier poin — motivasi naik level.
-- **Streak check-in harian** dengan bonus bertingkat, hari ke-7 bonus besar — kebiasaan kembali tiap hari.
-- **Poin per transaksi** (10 poin / Rp10.000 × multiplier).
-- **Katalog reward** untuk tukar poin.
-- **Kode referral** — akuisisi via teman.
-- Riwayat poin, mobile-first, dark mode.
+## Fitur
+| Kebutuhan | Di aplikasi |
+|---|---|
+| Transaksi → poin (integrasi Payments) | Menu **Bayar**: simulasi Hompimplay Payments → `POST /api/transactions` → poin (1 poin/Rp1.000 × multiplier level) |
+| Transaksi → QR (seperti gelang) | Pembelian tiket otomatis menerbitkan **Tiket QR** berisi daftar wahana |
+| Lacak wahana belum dimainkan | Menu **Tiket QR** + banner "Belum dimainkan" di beranda + badge di peta |
+| Aktivitas → poin | "Scan di gate" pada wahana memberi poin |
+| Voucher creation & redeem | **Panel Admin** (buat voucher), menu **Reward** (katalog, tukar, voucher saya + QR untuk kasir) |
+| Riwayat poin & penukaran | Menu **Riwayat** dengan filter dan ringkasan |
+| Peta interaktif | Menu **Peta**: zona Jungle, City, Farm, Park, Island, Bukit Strawberry, Planet |
+| Level member | Explorer → Adventurer → Ranger → Legend |
 
-## Jalankan lokal
+## Struktur
+- `app/page.js` — seluruh UI
+- `lib/data.js` — zona, wahana, produk, voucher (mock)
+- `lib/hompimpay.js` — adapter integrasi Payments (ganti dengan API asli)
+- `app/api/transactions/route.js` — endpoint/webhook transaksi lunas
+
+## Jalankan
 ```bash
-npm install
-npm run dev
+npm install && npm run dev
 ```
+Deploy: push ke GitHub → import di Vercel → Deploy (Root Directory = folder yang berisi package.json).
 
-## Deploy ke Vercel
-1. Push folder ini ke GitHub.
-2. Di vercel.com → Add New Project → import repo → Deploy (framework Next.js terdeteksi otomatis).
-   Atau via CLI: `npx vercel --prod`.
+## Menuju produksi (estimasi 1–2 bulan)
+1. **Minggu 1–2**: Auth (OTP WhatsApp/email), database (Supabase/Vercel Postgres): users, transactions, points_ledger, tickets, vouchers, redemptions.
+2. **Minggu 3–4**: Integrasi webhook Hompimplay Payments (`transaction.paid`) → ledger poin + penerbitan tiket QR bertanda tangan (HMAC) agar tidak bisa dipalsukan.
+3. **Minggu 5–6**: Scanner gate/kasir (web app staf pakai kamera), panel admin voucher & laporan, embed ke website hompimplay.id.
+4. **Minggu 7–8**: UAT, PWA (bisa di-install di HP), monitoring, go-live.
 
-## Catatan
-Data disimpan di `localStorage` (mode demo, per-browser). Untuk produksi multi-user, tambahkan
-login + database (mis. Vercel Postgres / Supabase) dan pindahkan logika poin ke API route agar tidak bisa dimanipulasi dari browser.
+Catatan: logo diambil langsung dari hompimplay.id (fallback ke teks). Palet warna hijau/oranye/kuning adalah perkiraan, jadi sesuaikan dengan brand guideline resmi.

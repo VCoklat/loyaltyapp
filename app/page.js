@@ -1,168 +1,360 @@
 "use client";
 import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { LOGO, TIERS, ZONES, GAMES, PRODUCTS, DEFAULT_VOUCHERS } from "@/lib/data";
 
-const TIERS = [
-  { name: "Bronze", min: 0, mult: 1 },
-  { name: "Silver", min: 500, mult: 1.25 },
-  { name: "Gold", min: 1500, mult: 1.5 },
-  { name: "Platinum", min: 4000, mult: 2 },
-];
-const REWARDS = [
-  { id: "r1", name: "Diskon 10%", cost: 200 },
-  { id: "r2", name: "Gratis Minuman", cost: 350 },
-  { id: "r3", name: "Voucher Rp50.000", cost: 800 },
-  { id: "r4", name: "Merchandise Eksklusif", cost: 1500 },
-];
-const STREAK_BONUS = [10, 10, 15, 15, 20, 25, 50]; // hari ke-7 bonus besar
-const KEY = "loyalty_v1";
-const today = () => new Date().toISOString().slice(0, 10);
-const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+const KEY = "hompim_rewards_v2";
+const rp = (n) => "Rp" + n.toLocaleString("id-ID");
+const now = () => new Date().toISOString();
+const fmt = (d) => new Date(d).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const rid = (p) => p + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+const gameById = (id) => GAMES.find((g) => g.id === id);
+const zoneById = (id) => ZONES.find((z) => z.id === id);
 
 const fresh = () => ({
-  points: 50, lifetime: 50, streak: 0, lastCheckin: null,
-  code: "LOY" + Math.random().toString(36).slice(2, 7).toUpperCase(),
-  referred: false,
-  history: [{ t: today(), d: "Bonus selamat datang", p: 50 }],
+  member: { id: rid("HMP"), name: "Kak Dedy" },
+  points: 100, lifetime: 100,
+  tickets: [], myVouchers: [],
+  vouchers: DEFAULT_VOUCHERS,
+  history: [{ t: now(), d: "Bonus member baru", p: 100, k: "earn" }],
 });
 
-export default function Home() {
+export default function App() {
   const [s, setS] = useState(null);
   const [tab, setTab] = useState("home");
   const [toast, setToast] = useState("");
-  const [amount, setAmount] = useState("");
-  const [ref, setRef] = useState("");
+  const [modal, setModal] = useState(null);
 
   useEffect(() => {
-    let d;
-    try { d = JSON.parse(localStorage.getItem(KEY)); } catch {}
-    d = d || fresh();
-    // streak putus jika lewat >1 hari
-    if (d.lastCheckin && daysBetween(d.lastCheckin, today()) > 1) d.streak = 0;
-    setS(d);
+    let d; try { d = JSON.parse(localStorage.getItem(KEY)); } catch {}
+    setS(d || fresh());
   }, []);
   useEffect(() => { if (s) try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }, [s]);
-
   if (!s) return null;
 
   const tier = [...TIERS].reverse().find((t) => s.lifetime >= t.min);
   const next = TIERS[TIERS.indexOf(tier) + 1];
   const pct = next ? ((s.lifetime - tier.min) / (next.min - tier.min)) * 100 : 100;
-  const checkedToday = s.lastCheckin === today();
+  const unplayed = s.tickets.flatMap((t) => t.games.filter((g) => !g.played).map((g) => ({ ...g, ticket: t })));
 
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
-  const earn = (p, d, lifetime = true) =>
-    setS((x) => ({ ...x, points: x.points + p, lifetime: lifetime ? x.lifetime + p : x.lifetime,
-      history: [{ t: today(), d, p }, ...x.history].slice(0, 50) }));
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
+  const addHist = (x, d, p, k) => [{ t: now(), d, p, k }, ...x.history].slice(0, 100);
 
-  const checkin = () => {
-    const st = (s.streak % 7) + 1;
-    const p = STREAK_BONUS[st - 1];
-    setS((x) => ({ ...x, streak: x.streak + 1, lastCheckin: today() }));
-    earn(p, `Check-in hari ke-${st}`);
-    flash(`+${p} poin! Streak ${s.streak + 1} hari 🔥`);
+  // 1) Transaksi via Hompimplay Payments → poin + tiket QR
+  const pay = async (productId, qty) => {
+    const res = await fetch("/api/transactions", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, qty, multiplier: tier.mult }) });
+    const r = await res.json();
+    if (r.error) return flash(r.error);
+    setS((x) => ({ ...x, points: x.points + r.points, lifetime: x.lifetime + r.points,
+      tickets: [...r.tickets, ...x.tickets],
+      history: addHist(x, `${r.product} ×${qty} · ${rp(r.total)}`, r.points, "earn") }));
+    setModal({ type: "paid", r });
   };
-  const purchase = () => {
-    const rp = parseInt(amount, 10);
-    if (!rp || rp < 1000) return flash("Minimal Rp1.000");
-    const p = Math.floor((rp / 10000) * 10 * tier.mult); // 10 poin / Rp10rb × multiplier
-    earn(p, `Belanja Rp${rp.toLocaleString("id-ID")}`);
-    setAmount(""); flash(`+${p} poin (${tier.mult}× ${tier.name})`);
+
+  // 2) Aktivitas wahana (scan gelang/QR di gate) → poin
+  const playGame = (ticketId, gameId) => {
+    const g = gameById(gameId);
+    setS((x) => ({ ...x, points: x.points + g.pts, lifetime: x.lifetime + g.pts,
+      tickets: x.tickets.map((t) => t.id !== ticketId ? t : { ...t, games: t.games.map((y) => y.id === gameId ? { ...y, played: true, at: now() } : y) }),
+      history: addHist(x, `Main ${g.name}`, g.pts, "earn") }));
+    flash(`+${g.pts} poin dari ${g.name} 🎉`);
   };
-  const redeem = (r) => {
-    setS((x) => ({ ...x, points: x.points - r.cost,
-      history: [{ t: today(), d: `Tukar: ${r.name}`, p: -r.cost }, ...x.history] }));
-    flash(`${r.name} berhasil ditukar 🎉`);
+
+  // 3) Redeem voucher
+  const redeem = (v) => {
+    const code = rid("VC");
+    const exp = new Date(Date.now() + v.exp * 864e5).toISOString();
+    setS((x) => ({ ...x, points: x.points - v.cost,
+      vouchers: x.vouchers.map((y) => y.id === v.id ? { ...y, stock: y.stock - 1 } : y),
+      myVouchers: [{ code, name: v.name, cat: v.cat, exp, used: false, at: now() }, ...x.myVouchers],
+      history: addHist(x, `Tukar ${v.name}`, -v.cost, "redeem") }));
+    setModal({ type: "voucher", v: { code, name: v.name, exp } });
   };
-  const applyRef = () => {
-    if (!ref.trim() || ref.trim().toUpperCase() === s.code) return flash("Kode tidak valid");
-    setS((x) => ({ ...x, referred: true })); earn(100, "Bonus kode referral"); flash("+100 poin referral!");
+  const useVoucher = (code) => setS((x) => ({ ...x, myVouchers: x.myVouchers.map((v) => v.code === code ? { ...v, used: true } : v) }));
+
+  // 4) Admin: buat voucher
+  const createVoucher = (v) => {
+    setS((x) => ({ ...x, vouchers: [{ ...v, id: rid("V") }, ...x.vouchers] }));
+    flash("Voucher baru dipublikasikan ✅");
   };
-  const share = async () => {
-    const text = `Gabung Loyalty Club pakai kodeku ${s.code} dan dapat 100 poin!`;
-    try { navigator.share ? await navigator.share({ text }) : await navigator.clipboard.writeText(text); flash("Disalin!"); } catch {}
-  };
+
+  const props = { s, tier, next, pct, unplayed, pay, playGame, redeem, useVoucher, createVoucher, setTab, setModal, flash };
 
   return (
-    <main className="wrap">
+    <main className="app">
       {toast && <div className="toast">{toast}</div>}
+      <header className="top">
+        <Logo />
+        <span className="pill" style={{ color: tier.color }}>★ {s.points.toLocaleString("id-ID")} poin</span>
+      </header>
 
-      {tab === "home" && <>
-        <div className="card hero">
-          <div className="row"><span>Member {tier.name}</span><span>{tier.mult}× poin</span></div>
-          <div className="big">{s.points.toLocaleString("id-ID")}</div>
-          <div>poin tersedia</div>
-          <div className="bar"><i style={{ width: pct + "%" }} /></div>
-          <small>{next ? `${next.min - s.lifetime} poin lagi ke ${next.name}` : "Tier tertinggi 👑"}</small>
-        </div>
+      {tab === "home" && <Home {...props} />}
+      {tab === "pay" && <Pay {...props} />}
+      {tab === "qr" && <Tickets {...props} />}
+      {tab === "rewards" && <Rewards {...props} />}
+      {tab === "map" && <MapView {...props} />}
+      {tab === "history" && <History {...props} reset={() => setS(fresh())} />}
+      {tab === "admin" && <Admin {...props} />}
 
-        <div className="card">
-          <div className="row"><h2>Check-in Harian</h2><span className="mute">🔥 {s.streak} hari</span></div>
-          <div className="days">
-            {STREAK_BONUS.map((b, i) => (
-              <div key={i} className={"day" + (i < (checkedToday ? ((s.streak - 1) % 7) + 1 : s.streak % 7) ? " on" : "")}>+{b}</div>
-            ))}
-          </div>
-          <button style={{ width: "100%" }} disabled={checkedToday} onClick={checkin}>
-            {checkedToday ? "Sudah check-in, kembali besok!" : "Check-in sekarang"}
-          </button>
-        </div>
-
-        <div className="card">
-          <h2>Catat Transaksi</h2>
-          <p className="mute">10 poin per Rp10.000 × multiplier tier</p>
-          <div className="row">
-            <input inputMode="numeric" placeholder="Nominal (Rp)" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} />
-            <button onClick={purchase}>Tambah</button>
-          </div>
-        </div>
-      </>}
-
-      {tab === "rewards" && <div className="card">
-        <h2>Tukar Reward</h2>
-        <p className="mute">Saldo: {s.points} poin</p>
-        <div className="list">
-          {REWARDS.map((r) => (
-            <div key={r.id} className="row">
-              <div><b>{r.name}</b><div className="mute">{r.cost} poin</div></div>
-              <button disabled={s.points < r.cost} onClick={() => redeem(r)}>Tukar</button>
-            </div>
-          ))}
-        </div>
-      </div>}
-
-      {tab === "invite" && <>
-        <div className="card">
-          <h2>Ajak Teman</h2>
-          <p className="mute">Teman dapat 100 poin saat memakai kodemu.</p>
-          <div className="big" style={{ fontSize: 28, letterSpacing: 2 }}>{s.code}</div>
-          <button onClick={share}>Bagikan kode</button>
-        </div>
-        {!s.referred && <div className="card">
-          <h2>Punya kode referral?</h2>
-          <div className="row"><input placeholder="Masukkan kode" value={ref} onChange={(e) => setRef(e.target.value)} /><button onClick={applyRef}>Pakai</button></div>
-        </div>}
-        <div className="card">
-          <h2>Tier Member</h2>
-          <div className="list">{TIERS.map((t) => (
-            <div key={t.name} className="row"><b>{t.name}{t.name === tier.name ? " ✓" : ""}</b><span className="mute">{t.min}+ poin · {t.mult}×</span></div>
-          ))}</div>
-        </div>
-      </>}
-
-      {tab === "history" && <div className="card">
-        <h2>Riwayat Poin</h2>
-        <div className="list">{s.history.map((h, i) => (
-          <div key={i} className="row"><div>{h.d}<div className="mute">{h.t}</div></div>
-            <b style={{ color: h.p > 0 ? "var(--ok)" : "var(--accent)" }}>{h.p > 0 ? "+" : ""}{h.p}</b></div>
-        ))}</div>
-        <button className="ghost" style={{ marginTop: 12 }} onClick={() => { if (confirm("Reset data demo?")) setS(fresh()); }}>Reset demo</button>
-      </div>}
+      {modal && <Modal modal={modal} close={() => setModal(null)} s={s} />}
 
       <nav className="tabs">
-        {[["home", "🏠 Beranda"], ["rewards", "🎁 Reward"], ["invite", "👥 Ajak"], ["history", "📜 Riwayat"]].map(([k, l]) => (
-          <button key={k} className={tab === k ? "act" : ""} onClick={() => setTab(k)}>{l}</button>
+        {[["home", "🏠", "Beranda"], ["pay", "💳", "Bayar"], ["qr", "🎟️", "Tiket QR"], ["rewards", "🎁", "Reward"], ["map", "🗺️", "Peta"], ["history", "📜", "Riwayat"]].map(([k, i, l]) => (
+          <button key={k} className={tab === k ? "act" : ""} onClick={() => setTab(k)}><b>{i}</b>{l}</button>
         ))}
       </nav>
     </main>
   );
+}
+
+function Logo() {
+  const [err, setErr] = useState(false);
+  return err ? <span className="brand">HomPim Play</span>
+    : <img src={LOGO} alt="HomPim Play" onError={() => setErr(true)} />;
+}
+
+function Home({ s, tier, next, pct, unplayed, setTab, setModal }) {
+  return <>
+    <div className="card hero">
+      <div className="row"><b>Halo, {s.member.name} 👋</b><span className="tag" style={{ background: "#fff", color: tier.color }}>{tier.name} · {tier.mult}×</span></div>
+      <div className="big">{s.points.toLocaleString("id-ID")}</div>
+      <div>poin siap ditukar</div>
+      <div className="bar"><i style={{ width: pct + "%" }} /></div>
+      <small>{next ? `${(next.min - s.lifetime).toLocaleString("id-ID")} poin lagi ke ${next.name}` : "Level tertinggi 👑"}</small>
+    </div>
+
+    <div className="card row" onClick={() => setModal({ type: "member" })} style={{ cursor: "pointer" }}>
+      <div><h3 style={{ margin: 0 }}>QR Member</h3><div className="mute">Tunjukkan di kasir & gate wahana untuk dapat poin</div></div>
+      <QRCodeSVG value={s.member.id} size={56} />
+    </div>
+
+    <div className="grid4" style={{ marginBottom: 12 }}>
+      {[["💳", "Bayar", "pay"], ["🎟️", "Tiket", "qr"], ["🎁", "Voucher", "rewards"], ["🗺️", "Peta", "map"]].map(([e, l, t]) => (
+        <button key={t} className="quick" onClick={() => setTab(t)}><span>{e}</span>{l}</button>
+      ))}
+    </div>
+
+    {unplayed.length > 0 && <div className="card" style={{ borderColor: "var(--orange)" }}>
+      <div className="row"><h2>Belum dimainkan ⏳</h2><span className="tag o">{unplayed.length} wahana</span></div>
+      <p className="mute" style={{ marginTop: 0 }}>Sayang kalau terlewat! Tiket QR-mu masih berlaku.</p>
+      <button style={{ width: "100%" }} onClick={() => setTab("qr")}>Lihat tiket QR</button>
+    </div>}
+
+    <div className="card">
+      <h2>Cara dapat poin</h2>
+      <div className="list">
+        <div className="row"><span>💳 Transaksi via Hompimplay Payments</span><b>1 poin / Rp1.000</b></div>
+        <div className="row"><span>🎢 Main wahana (scan QR/gelang)</span><b>+15–30 poin</b></div>
+        <div className="row"><span>⭐ Bonus level {tier.name}</span><b>{tier.mult}×</b></div>
+      </div>
+    </div>
+    <button className="ghost" style={{ width: "100%" }} onClick={() => setTab("admin")}>⚙️ Panel Admin (buat voucher)</button>
+  </>;
+}
+
+function Pay({ pay, tier }) {
+  const [pid, setPid] = useState(PRODUCTS[0].id);
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const p = PRODUCTS.find((x) => x.id === pid);
+  const pts = Math.floor((p.price * qty) / 1000 * tier.mult);
+  return <div className="card">
+    <h2>Hompimplay Payments</h2>
+    <p className="mute" style={{ marginTop: 0 }}>Simulasi transaksi. Setiap pembayaran otomatis jadi poin, dan pembelian tiket langsung terbit sebagai QR (pengganti gelang).</p>
+    <label>Produk</label>
+    <select value={pid} onChange={(e) => setPid(e.target.value)}>
+      {PRODUCTS.map((x) => <option key={x.id} value={x.id}>{x.name} — {rp(x.price)}</option>)}
+    </select>
+    <label>Jumlah</label>
+    <input type="number" min={1} max={10} value={qty} onChange={(e) => setQty(Math.max(1, +e.target.value || 1))} />
+    <div className="card" style={{ background: "#f3fbf6", marginTop: 12 }}>
+      <div className="row"><span>Total</span><b>{rp(p.price * qty)}</b></div>
+      <div className="row"><span>Poin didapat</span><b style={{ color: "var(--green)" }}>+{pts}</b></div>
+      <div className="row"><span>Tiket QR</span><b>{p.games.length ? `${qty} tiket · ${p.games.length} wahana` : "—"}</b></div>
+    </div>
+    <button className="green" style={{ width: "100%" }} disabled={busy}
+      onClick={async () => { setBusy(true); await pay(pid, qty); setBusy(false); }}>
+      {busy ? "Memproses..." : "Bayar dengan HompimPay"}
+    </button>
+  </div>;
+}
+
+function Tickets({ s, playGame, setModal }) {
+  const [f, setF] = useState("active");
+  const list = s.tickets.filter((t) => (f === "active") === t.games.some((g) => !g.played));
+  return <>
+    <div className="seg">
+      <button className={f === "active" ? "act" : ""} onClick={() => setF("active")}>Masih aktif</button>
+      <button className={f === "done" ? "act" : ""} onClick={() => setF("done")}>Selesai</button>
+    </div>
+    {list.length === 0 && <div className="card mute" style={{ textAlign: "center" }}>Belum ada tiket. Beli di menu Bayar 🎟️</div>}
+    {list.map((t) => {
+      const left = t.games.filter((g) => !g.played).length;
+      return <div key={t.id} className="card">
+        <div className="row">
+          <div><b>{t.product}</b><div className="mute">{t.id} · {fmt(t.issued)}</div></div>
+          <div onClick={() => setModal({ type: "ticket", t })} style={{ cursor: "pointer" }}><QRCodeSVG value={t.id} size={56} /></div>
+        </div>
+        <div className="mute" style={{ margin: "8px 0" }}>{left} dari {t.games.length} wahana belum dimainkan</div>
+        <div className="list">
+          {t.games.map((g) => {
+            const gm = gameById(g.id), z = zoneById(gm.zone);
+            return <div key={g.id} className="row">
+              <div>{z.emoji} {gm.name}<div className="mute">{z.name} · +{gm.pts} poin</div></div>
+              {g.played ? <span className="tag g">✓ Dimainkan</span>
+                : <button className="green" style={{ padding: "6px 10px", fontSize: 13 }} onClick={() => playGame(t.id, g.id)}>Scan di gate</button>}
+            </div>;
+          })}
+        </div>
+      </div>;
+    })}
+  </>;
+}
+
+function Rewards({ s, redeem, useVoucher, setModal }) {
+  const [f, setF] = useState("catalog");
+  const [cat, setCat] = useState("Semua");
+  const cats = ["Semua", ...new Set(s.vouchers.map((v) => v.cat))];
+  return <>
+    <div className="seg">
+      <button className={f === "catalog" ? "act" : ""} onClick={() => setF("catalog")}>Katalog</button>
+      <button className={f === "mine" ? "act" : ""} onClick={() => setF("mine")}>Voucher saya ({s.myVouchers.filter((v) => !v.used).length})</button>
+    </div>
+    {f === "catalog" ? <>
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12 }}>
+        {cats.map((c) => <button key={c} className={c === cat ? "green" : "ghost"} style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setCat(c)}>{c}</button>)}
+      </div>
+      {s.vouchers.filter((v) => cat === "Semua" || v.cat === cat).map((v) => (
+        <div key={v.id} className="card voucher row">
+          <div><span className="tag o">{v.cat}</span><div><b>{v.name}</b></div><div className="mute">{v.cost} poin · sisa {v.stock} · berlaku {v.exp} hari</div></div>
+          <button disabled={s.points < v.cost || v.stock < 1} onClick={() => redeem(v)}>Tukar</button>
+        </div>
+      ))}
+    </> : <>
+      {s.myVouchers.length === 0 && <div className="card mute" style={{ textAlign: "center" }}>Belum ada voucher.</div>}
+      {s.myVouchers.map((v) => (
+        <div key={v.code} className="card voucher" style={{ opacity: v.used ? 0.5 : 1 }}>
+          <div className="row">
+            <div><b>{v.name}</b><div className="mute">{v.code} · s/d {new Date(v.exp).toLocaleDateString("id-ID")}</div></div>
+            {v.used ? <span className="tag g">Terpakai</span>
+              : <button className="green" onClick={() => setModal({ type: "voucher", v, onUse: () => useVoucher(v.code) })}>Pakai</button>}
+          </div>
+        </div>
+      ))}
+    </>}
+  </>;
+}
+
+function MapView({ unplayed }) {
+  const [sel, setSel] = useState(ZONES[0]);
+  const pending = (zid) => unplayed.filter((u) => gameById(u.id).zone === zid).length;
+  return <>
+    <div className="card" style={{ padding: 8 }}>
+      <svg viewBox="0 0 360 300" className="map">
+        <path d="M0 140 Q90 120 180 150 T360 140" stroke="#e9d9a8" strokeWidth="18" fill="none" />
+        <path d="M180 0 V300" stroke="#e9d9a8" strokeWidth="14" />
+        <ellipse cx="205" cy="245" rx="70" ry="38" fill="#9fd8f5" />
+        <circle cx="300" cy="215" r="34" fill="#b6e2a1" />
+        {ZONES.map((z) => {
+          const n = pending(z.id);
+          return <g key={z.id} className={sel.id === z.id ? "sel" : ""} onClick={() => setSel(z)}>
+            <circle cx={z.x} cy={z.y} r="24" fill={z.color} />
+            <text x={z.x} y={z.y + 7} textAnchor="middle" fontSize="20">{z.emoji}</text>
+            <text x={z.x} y={z.y + 40} textAnchor="middle" fontSize="10" fontWeight="700" fill="#22301f">{z.name.replace("Hompim ", "")}</text>
+            {n > 0 && <><circle cx={z.x + 18} cy={z.y - 18} r="9" fill="#ef5d8f" /><text x={z.x + 18} y={z.y - 14} textAnchor="middle" fontSize="11" fill="#fff" fontWeight="800">{n}</text></>}
+          </g>;
+        })}
+        <text x="10" y="292" fontSize="10" fill="#2d5a27">🚪 Pintu masuk · Jl. Rancakendal Luhur No.9</text>
+      </svg>
+    </div>
+    <div className="card">
+      <div className="row"><h2>{sel.emoji} {sel.name}</h2><span className="tag">{sel.type}</span></div>
+      <p className="mute" style={{ marginTop: 0 }}>{sel.desc}</p>
+      <div className="list">
+        {GAMES.filter((g) => g.zone === sel.id).map((g) => (
+          <div key={g.id} className="row"><span>{g.name}</span><b>+{g.pts} poin</b></div>
+        ))}
+      </div>
+      {pending(sel.id) > 0 && <p style={{ color: "var(--pink)", fontWeight: 700 }}>📍 {pending(sel.id)} wahana di zona ini belum kamu mainkan</p>}
+    </div>
+    <a className="mute" target="_blank" rel="noreferrer" href="https://maps.google.com/?q=-6.8699251,107.6278598">Buka lokasi di Google Maps →</a>
+  </>;
+}
+
+function History({ s, reset }) {
+  const [f, setF] = useState("all");
+  const list = s.history.filter((h) => f === "all" || h.k === f);
+  const earned = s.history.filter((h) => h.p > 0).reduce((a, h) => a + h.p, 0);
+  const spent = -s.history.filter((h) => h.p < 0).reduce((a, h) => a + h.p, 0);
+  return <>
+    <div className="grid2" style={{ marginBottom: 12 }}>
+      <div className="card" style={{ margin: 0 }}><div className="mute">Total dikumpulkan</div><div className="big" style={{ fontSize: 28, color: "var(--green)" }}>{earned}</div></div>
+      <div className="card" style={{ margin: 0 }}><div className="mute">Total ditukar</div><div className="big" style={{ fontSize: 28, color: "var(--orange)" }}>{spent}</div></div>
+    </div>
+    <div className="seg">
+      {[["all", "Semua"], ["earn", "Dapat poin"], ["redeem", "Penukaran"]].map(([k, l]) => (
+        <button key={k} className={f === k ? "act" : ""} onClick={() => setF(k)}>{l}</button>
+      ))}
+    </div>
+    <div className="card list">
+      {list.map((h, i) => (
+        <div key={i} className="row"><div>{h.d}<div className="mute">{fmt(h.t)}</div></div>
+          <b style={{ color: h.p > 0 ? "var(--green)" : "var(--orange)" }}>{h.p > 0 ? "+" : ""}{h.p}</b></div>
+      ))}
+    </div>
+    <button className="ghost" onClick={() => { if (confirm("Reset data demo?")) reset(); }}>Reset demo</button>
+  </>;
+}
+
+function Admin({ s, createVoucher, setTab }) {
+  const [v, setV] = useState({ name: "", cost: 200, stock: 50, cat: "Wahana", exp: 30 });
+  const set = (k) => (e) => setV({ ...v, [k]: e.target.type === "number" ? +e.target.value : e.target.value });
+  return <>
+    <div className="card">
+      <h2>Buat Voucher Baru</h2>
+      <label>Nama voucher</label><input value={v.name} onChange={set("name")} placeholder="mis. Free Flying Fox" />
+      <div className="grid2">
+        <div><label>Harga (poin)</label><input type="number" value={v.cost} onChange={set("cost")} /></div>
+        <div><label>Stok</label><input type="number" value={v.stock} onChange={set("stock")} /></div>
+        <div><label>Kategori</label>
+          <select value={v.cat} onChange={set("cat")}>{["Wahana", "Tiket", "F&B", "Hadiah", "Event"].map((c) => <option key={c}>{c}</option>)}</select></div>
+        <div><label>Masa berlaku (hari)</label><input type="number" value={v.exp} onChange={set("exp")} /></div>
+      </div>
+      <button className="green" style={{ width: "100%", marginTop: 12 }} disabled={!v.name.trim()}
+        onClick={() => { createVoucher(v); setV({ ...v, name: "" }); }}>Publikasikan voucher</button>
+    </div>
+    <div className="card">
+      <h2>Voucher aktif</h2>
+      <div className="list">{s.vouchers.map((x) => (
+        <div key={x.id} className="row"><span>{x.name}</span><span className="mute">{x.cost} pt · stok {x.stock}</span></div>
+      ))}</div>
+    </div>
+    <button className="ghost" onClick={() => setTab("home")}>← Kembali</button>
+  </>;
+}
+
+function Modal({ modal, close, s }) {
+  const { type } = modal;
+  let title, value, body;
+  if (type === "member") { title = "QR Member"; value = s.member.id; body = <p className="mute">{s.member.name} · {s.member.id}</p>; }
+  if (type === "ticket") { title = modal.t.product; value = modal.t.id; body = <p className="mute">Scan di gate wahana. Berlaku untuk wahana yang belum dimainkan.</p>; }
+  if (type === "voucher") { title = modal.v.name; value = modal.v.code; body = <p className="mute">Kode {modal.v.code} · berlaku s/d {new Date(modal.v.exp).toLocaleDateString("id-ID")}</p>; }
+  if (type === "paid") {
+    const r = modal.r;
+    return <div className="modal" onClick={close}><div className="card" onClick={(e) => e.stopPropagation()}>
+      <div style={{ fontSize: 48 }}>✅</div><h2>Pembayaran berhasil</h2>
+      <p className="mute">{r.trxId} · {r.product} · {rp(r.total)}</p>
+      <div className="big" style={{ color: "var(--green)" }}>+{r.points}</div><p>poin masuk ke akunmu</p>
+      {r.tickets.length > 0 && <p><b>{r.tickets.length} tiket QR</b> terbit di menu Tiket QR 🎟️</p>}
+      <button className="green" onClick={close} style={{ width: "100%" }}>Oke</button>
+    </div></div>;
+  }
+  return <div className="modal" onClick={close}><div className="card" onClick={(e) => e.stopPropagation()}>
+    <h2>{title}</h2>
+    <div className="qrbox"><QRCodeSVG value={value} size={200} /></div>
+    {body}
+    {modal.onUse && <button className="green" style={{ width: "100%", marginBottom: 8 }} onClick={() => { modal.onUse(); close(); }}>Tandai sudah dipakai kasir</button>}
+    <button className="ghost" style={{ width: "100%" }} onClick={close}>Tutup</button>
+  </div></div>;
 }

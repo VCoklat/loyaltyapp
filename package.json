@@ -1,6 +1,6 @@
 {
-  "name": "loyalty-app",
-  "version": "1.0.0",
+  "name": "hompimplay-rewards",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "next": "14.2.15",
+    "qrcode.react": "3.1.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   }
